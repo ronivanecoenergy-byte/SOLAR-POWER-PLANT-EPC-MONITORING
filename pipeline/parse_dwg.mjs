@@ -1,0 +1,16 @@
+import { Dwg_File_Type, LibreDwg } from '@mlightcad/libredwg-web';
+import fs from 'fs';
+const file = process.argv[2];
+const out = process.argv[3];
+const libredwg = await LibreDwg.create('./node_modules/@mlightcad/libredwg-web/wasm/');
+const buf = fs.readFileSync(file);
+const dwg = libredwg.dwg_read_data(buf, Dwg_File_Type.DWG);
+const db = libredwg.convert(dwg);
+libredwg.dwg_free(dwg);
+fs.writeFileSync(out, JSON.stringify(db, (k, v) => (typeof v === 'bigint' ? Number(v) : v)));
+const counts = {};
+for (const e of db.entities) counts[e.type] = (counts[e.type] || 0) + 1;
+console.log(file, 'entities', db.entities.length, counts);
+console.log('tables keys', Object.keys(db.tables || {}));
+console.log('layers', (db.tables?.LAYER?.entries || []).map(l => `${l.name}:${l.colorIndex ?? l.color}`).join(' | '));
+console.log('blocks', (db.tables?.BLOCK_RECORD?.entries || []).length);

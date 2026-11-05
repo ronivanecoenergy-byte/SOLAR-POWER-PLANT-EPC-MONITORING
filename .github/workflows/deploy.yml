@@ -1,0 +1,162 @@
+# Deploys the app: prepares the Supabase project (migrations, CAD baseline, role accounts,
+# drone tiles), builds the web app, publishes it on GitHub Pages and smoke-tests the live site.
+#
+# Repository secrets (Settings → Secrets and variables → Actions):
+#   SUPABASE_ACCESS_TOKEN  personal access token from supabase.com/dashboard/account/tokens
+#   SUPABASE_PROJECT_REF   the project's Reference ID (Project Settings → General)
+#   DATA_KEY               key that decrypts data/bundle.tar.gz.enc
+# Optional repository variable: SMOKE_TESTS = off  (skips the live smoke tests, e.g. after the
+# demo accounts have been deactivated).
+#
+# The repository is public, so this workflow never prints keys or passwords and keeps no test
+# traces, screenshots or artifacts other than the published site.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  DRONE_PREFIX: 2026-10-26/
+
+jobs:
+  build:
+    name: Prepare Supabase and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      entry: ${{ steps.build.outputs.entry }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check repository secrets
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          DATA_KEY: ${{ secrets.DATA_KEY }}
+        run: |
+          missing=""
+          [ -n "$SUPABASE_ACCESS_TOKEN" ] || missing="$missing SUPABASE_ACCESS_TOKEN"
+          [ -n "$SUPABASE_PROJECT_REF" ] || missing="$missing SUPABASE_PROJECT_REF"
+          [ -n "$DATA_KEY" ] || missing="$missing DATA_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::Add these repository secrets (Settings → Secrets and variables → Actions):$missing"
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Decrypt project data
+        env:
+          DATA_KEY: ${{ secrets.DATA_KEY }}
+        run: |
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 -pass env:DATA_KEY -in data/bundle.tar.gz.enc | tar xz
+          node -e "for (const u of require('./data/secrets/demo_users.json')) console.log('::add-mask::' + u.password)"
+          echo "seed files: $(ls data/build/seed | wc -l), drone tiles: $(find data/build/tiles -type f | wc -l)"
+
+      - name: Configure GitHub Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Apply database migrations and load the CAD baseline
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          SITE_URL: ${{ steps.pages.outputs.base_url }}
+        run: node scripts/ci/supabase-setup.mjs
+
+      - name: Create role accounts and upload drone tiles
+        run: node scripts/provision.mjs --users data/secrets/demo_users.json --tiles data/build/tiles --prefix "$DRONE_PREFIX"
+
+      - name: Build
+        id: build
+        env:
+          BASE_PATH: ${{ steps.pages.outputs.base_path }}/
+        run: |
+          VITE_SUPABASE_URL="$SUPABASE_URL" VITE_SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY" npm run build
+          echo "entry=$(grep -o 'assets/index-[^"]*\.js' dist/index.html | head -1)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    name: Publish on GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  smoke:
+    name: Smoke-test the live site (read-only)
+    needs: [build, deploy]
+    if: vars.SMOKE_TESTS != 'off'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DEMO_USERS: data/secrets/demo_users.json
+      BASE_URL: ${{ needs.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Decrypt the role accounts
+        env:
+          DATA_KEY: ${{ secrets.DATA_KEY }}
+        run: |
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 -pass env:DATA_KEY -in data/bundle.tar.gz.enc | tar xz data/secrets/demo_users.json
+          node -e "for (const u of require('./data/secrets/demo_users.json')) console.log('::add-mask::' + u.password)"
+
+      - name: Read the project keys
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: node scripts/ci/supabase-setup.mjs --keys-only
+
+      - name: Wait until the new version is live
+        env:
+          ENTRY: ${{ needs.build.outputs.entry }}
+        run: |
+          for i in $(seq 1 40); do
+            if curl -fsS "$BASE_URL" | grep -q "$ENTRY"; then echo "live: $BASE_URL"; exit 0; fi
+            sleep 15
+          done
+          echo "::error::$BASE_URL did not serve the new build within 10 minutes"; exit 1
+
+      - name: Permission checks against the live database
+        run: node scripts/api-tests.mjs --readonly
+
+      - name: Install Chromium for the browser tests
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser tests on desktop and phone (read-only)
+        env:
+          E2E_READONLY: '1'
+        run: npx playwright test --reporter=list

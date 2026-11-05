@@ -1,0 +1,19 @@
+# dependencies and build output
+node_modules/
+dist/
+*.tsbuildinfo
+
+# project data stays out of the public repository: it is committed only as
+# data/bundle.tar.gz.enc (encrypted with the DATA_KEY repository secret)
+data/source/
+data/parsed/
+data/build/
+data/secrets/
+
+# local settings and test output
+.env
+.env.*
+test-results/
+playwright-report/
+blob-report/
+api-test-report.json
