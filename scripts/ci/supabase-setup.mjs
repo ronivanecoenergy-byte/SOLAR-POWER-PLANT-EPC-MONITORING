@@ -11,13 +11,23 @@ import path from 'node:path';
 // Secrets are often pasted with a line break, quotes or a "Bearer " prefix; accept those, and accept
 // the project URL in place of its Reference ID. Never print the values (the logs are public).
 const clean = (v) => (v || '').trim().replace(/^["']|["']$/g, '').trim().replace(/^bearer\s+/i, '').trim();
-const token = clean(process.env.SUPABASE_ACCESS_TOKEN);
+let token = clean(process.env.SUPABASE_ACCESS_TOKEN);
 let ref = clean(process.env.SUPABASE_PROJECT_REF);
 const fromUrl = ref.match(/^https?:\/\/([a-z0-9]+)\.supabase\.(?:co|com|in)/i) || ref.match(/\/project\/([a-z0-9]+)/i);
 if (fromUrl) ref = fromUrl[1];
 const fail = (m) => { console.error(`::error::${m}`); process.exit(1); };
 if (!token || !ref) fail('SUPABASE_ACCESS_TOKEN and SUPABASE_PROJECT_REF are required');
-if (/\s/.test(token)) fail('SUPABASE_ACCESS_TOKEN contains spaces or line breaks inside it. Paste only the token (it starts with sbp_).');
+if (/\s/.test(token)) {
+  // e.g. "name: sbp_…", or the token and the project ID pasted together: use the one complete token in it
+  const found = [...new Set(token.match(/sbp_[A-Za-z0-9_]{32,}/g) || [])];
+  if (found.length === 1) {
+    console.log('::warning::SUPABASE_ACCESS_TOKEN holds other text besides the token; using the one sbp_ token found in it. Consider saving only the token.');
+    token = found[0];
+  } else {
+    const parts = token.split(/\s+/).map((x) => /^sbp_/.test(x) ? `an incomplete or extra token (${x.length} characters)` : /^eyJ/.test(x) ? 'a JWT project key' : /^[a-z]{20}$/.test(x) ? 'a project Reference ID' : `other text (${x.length} characters)`);
+    fail(`SUPABASE_ACCESS_TOKEN must contain only the personal access token (sbp_ followed by 40 characters, no spaces). It has ${parts.length} parts: ${parts.join('; ')}.`);
+  }
+}
 if (!/^sbp_/.test(token)) {
   const looks = /^eyJ/.test(token) ? 'a project API key (anon or service_role JWT)' : /^sb_(secret|publishable)_/.test(token) ? 'a project API key (sb_secret_/sb_publishable_)' : 'something other than a personal access token';
   fail(`SUPABASE_ACCESS_TOKEN looks like ${looks}. It must be a personal access token from supabase.com/dashboard/account/tokens; those start with sbp_.`);
