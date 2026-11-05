@@ -1,5 +1,7 @@
 # Expansion PV Farm — one-stop project monitoring
 
+**Live app: https://ronivanecoenergy-byte.github.io/SOLAR-POWER-PLANT-EPC-MONITORING/** (sign-in required)
+
 A web app for desktop and phone that ties every PV table on the site keyplan to its installation
 progress, subcontractor, inspections and approvals. The **Interactive Digital Keyplan** is the
 centre of it: the latest drone image with the CAD table outlines laid over it, table by table.
@@ -78,7 +80,8 @@ corrected:
 One-time setup:
 1. Create a Supabase project and an access token (supabase.com/dashboard/account/tokens).
 2. In the GitHub repository, add the secrets `SUPABASE_ACCESS_TOKEN`, `SUPABASE_PROJECT_REF`
-   and `DATA_KEY`.
+   and `DATA_KEY`. Each value is recognised by its form, so it does not matter which secret holds
+   which value. The project ID is also recorded in the workflow (`FALLBACK_PROJECT_REF`).
 3. Set **Settings → Pages → Source** to "GitHub Actions".
 
 Each push to `main` then runs three jobs:
