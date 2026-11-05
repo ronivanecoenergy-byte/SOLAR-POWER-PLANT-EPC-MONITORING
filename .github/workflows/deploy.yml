@@ -5,6 +5,8 @@
 #   SUPABASE_ACCESS_TOKEN  personal access token from supabase.com/dashboard/account/tokens
 #   SUPABASE_PROJECT_REF   the project's Reference ID (Project Settings → General)
 #   DATA_KEY               key that decrypts data/bundle.tar.gz.enc
+# Each value is recognised by its form, so a value saved under another of these names still works
+# (scripts/ci/resolve-secrets.mjs).
 # Optional repository variable: SMOKE_TESTS = off  (skips the live smoke tests, e.g. after the
 # demo accounts have been deactivated).
 #
@@ -28,6 +30,9 @@ concurrency:
 
 env:
   DRONE_PREFIX: 2026-10-26/
+  # used only when no secret holds the Supabase project address or ID (the ID is public: it is part
+  # of the app's Supabase address)
+  FALLBACK_PROJECT_REF: ''
 
 jobs:
   build:
@@ -49,26 +54,11 @@ jobs:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
           DATA_KEY: ${{ secrets.DATA_KEY }}
-        run: |
-          missing=""
-          [ -n "$SUPABASE_ACCESS_TOKEN" ] || missing="$missing SUPABASE_ACCESS_TOKEN"
-          [ -n "$SUPABASE_PROJECT_REF" ] || missing="$missing SUPABASE_PROJECT_REF"
-          [ -n "$DATA_KEY" ] || missing="$missing DATA_KEY"
-          if [ -n "$missing" ]; then
-            echo "::error::Add these repository secrets (Settings → Secrets and variables → Actions):$missing"
-            exit 1
-          fi
-          # check all three before stopping, so one run reports every problem
-          ok=1
-          node scripts/ci/supabase-setup.mjs --check || ok=0
-          scripts/ci/decrypt-data.sh --check || ok=0
-          [ "$ok" = 1 ]
+        run: node scripts/ci/resolve-secrets.mjs
 
       - run: npm ci
 
       - name: Decrypt project data
-        env:
-          DATA_KEY: ${{ secrets.DATA_KEY }}
         run: |
           scripts/ci/decrypt-data.sh
           node -e "for (const u of require('./data/secrets/demo_users.json')) console.log('::add-mask::' + u.password)"
@@ -80,8 +70,6 @@ jobs:
 
       - name: Apply database migrations and load the CAD baseline
         env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
           SITE_URL: ${{ steps.pages.outputs.base_url }}
         run: node scripts/ci/supabase-setup.mjs
 
@@ -130,19 +118,21 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Find the repository secrets
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          DATA_KEY: ${{ secrets.DATA_KEY }}
+        run: node scripts/ci/resolve-secrets.mjs
+
       - run: npm ci
 
       - name: Decrypt the role accounts
-        env:
-          DATA_KEY: ${{ secrets.DATA_KEY }}
         run: |
           scripts/ci/decrypt-data.sh data/secrets/demo_users.json
           node -e "for (const u of require('./data/secrets/demo_users.json')) console.log('::add-mask::' + u.password)"
 
       - name: Read the project keys
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
         run: node scripts/ci/supabase-setup.mjs --keys-only
 
       - name: Wait until the new version is live
