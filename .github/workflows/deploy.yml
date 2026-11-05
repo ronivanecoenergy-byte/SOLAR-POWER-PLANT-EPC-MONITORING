@@ -65,7 +65,7 @@ jobs:
         env:
           DATA_KEY: ${{ secrets.DATA_KEY }}
         run: |
-          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 -pass env:DATA_KEY -in data/bundle.tar.gz.enc | tar xz
+          scripts/ci/decrypt-data.sh
           node -e "for (const u of require('./data/secrets/demo_users.json')) console.log('::add-mask::' + u.password)"
           echo "seed files: $(ls data/build/seed | wc -l), drone tiles: $(find data/build/tiles -type f | wc -l)"
 
@@ -131,7 +131,7 @@ jobs:
         env:
           DATA_KEY: ${{ secrets.DATA_KEY }}
         run: |
-          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 -pass env:DATA_KEY -in data/bundle.tar.gz.enc | tar xz data/secrets/demo_users.json
+          scripts/ci/decrypt-data.sh data/secrets/demo_users.json
           node -e "for (const u of require('./data/secrets/demo_users.json')) console.log('::add-mask::' + u.password)"
 
       - name: Read the project keys
