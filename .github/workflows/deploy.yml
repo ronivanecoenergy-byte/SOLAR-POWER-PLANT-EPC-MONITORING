@@ -32,7 +32,7 @@ env:
   DRONE_PREFIX: 2026-10-26/
   # used only when no secret holds the Supabase project address or ID (the ID is public: it is part
   # of the app's Supabase address)
-  FALLBACK_PROJECT_REF: ''
+  FALLBACK_PROJECT_REF: laczazqpjignvziqwphh   # 70.5 MWp PAGBILAO 1B SOLAR POWER PLANT
 
 jobs:
   build:
