@@ -16,24 +16,31 @@ let ref = clean(process.env.SUPABASE_PROJECT_REF);
 const fromUrl = ref.match(/^https?:\/\/([a-z0-9]+)\.supabase\.(?:co|com|in)/i) || ref.match(/\/project\/([a-z0-9]+)/i);
 if (fromUrl) ref = fromUrl[1];
 const fail = (m) => { console.error(`::error::${m}`); process.exit(1); };
-if (!token || !ref) fail('SUPABASE_ACCESS_TOKEN and SUPABASE_PROJECT_REF are required');
-if (/\s/.test(token)) {
+// describe a value by the kinds and lengths of its parts, never the characters themselves
+const kinds = (v) => v.split(/\s+/).map((x) => /^sbp_/.test(x) ? `an access token or part of one (${x.length} characters)` : /^eyJ/.test(x) ? 'a JWT project key'
+  : /^[a-z]{20}$/.test(x) ? 'a project Reference ID' : /^https?:/.test(x) ? 'a URL' : `other text (${x.length} characters)`);
+const problems = [];
+if (!token) problems.push('SUPABASE_ACCESS_TOKEN is empty.');
+else if (/\s/.test(token)) {
   // e.g. "name: sbp_…", or the token and the project ID pasted together: use the one complete token in it
   const found = [...new Set(token.match(/sbp_[A-Za-z0-9_]{32,}/g) || [])];
   if (found.length === 1) {
     console.log('::warning::SUPABASE_ACCESS_TOKEN holds other text besides the token; using the one sbp_ token found in it. Consider saving only the token.');
     token = found[0];
   } else {
-    const parts = token.split(/\s+/).map((x) => /^sbp_/.test(x) ? `an incomplete or extra token (${x.length} characters)` : /^eyJ/.test(x) ? 'a JWT project key' : /^[a-z]{20}$/.test(x) ? 'a project Reference ID' : `other text (${x.length} characters)`);
-    fail(`SUPABASE_ACCESS_TOKEN must contain only the personal access token (sbp_ followed by 40 characters, no spaces). It has ${parts.length} parts: ${parts.join('; ')}.`);
+    const parts = kinds(token);
+    problems.push(`SUPABASE_ACCESS_TOKEN must contain only a Supabase personal access token (sbp_ followed by 40 characters, no spaces). It has ${parts.length} parts: ${parts.join('; ')}.`);
   }
+} else if (!/^sbp_/.test(token)) {
+  const looks = /^eyJ/.test(token) ? 'a project API key (anon or service_role JWT)' : /^sb_(secret|publishable)_/.test(token) ? 'a project API key (sb_secret_/sb_publishable_)' : `something other than a personal access token (${token.length} characters)`;
+  problems.push(`SUPABASE_ACCESS_TOKEN looks like ${looks}. It must be a personal access token from supabase.com/dashboard/account/tokens; those start with sbp_.`);
 }
-if (!/^sbp_/.test(token)) {
-  const looks = /^eyJ/.test(token) ? 'a project API key (anon or service_role JWT)' : /^sb_(secret|publishable)_/.test(token) ? 'a project API key (sb_secret_/sb_publishable_)' : 'something other than a personal access token';
-  fail(`SUPABASE_ACCESS_TOKEN looks like ${looks}. It must be a personal access token from supabase.com/dashboard/account/tokens; those start with sbp_.`);
-}
-if (!/^[a-z0-9]+$/.test(ref)) fail('SUPABASE_PROJECT_REF should be the project Reference ID (Project Settings → General), e.g. abcdefghijklmnopqrst, or the project URL.');
-if (ref.length !== 20) console.log(`::warning::SUPABASE_PROJECT_REF has ${ref.length} characters; Supabase Reference IDs usually have 20.`);
+if (!ref) problems.push('SUPABASE_PROJECT_REF is empty.');
+else if (/\s/.test(ref) || !/^[a-z0-9]+$/.test(ref)) {
+  const parts = kinds(ref);
+  problems.push(`SUPABASE_PROJECT_REF must be only the project Reference ID (Project Settings → General; 20 lowercase letters) or the project URL. It has ${parts.length} part(s): ${parts.join('; ')}.`);
+} else if (ref.length !== 20) console.log(`::warning::SUPABASE_PROJECT_REF has ${ref.length} characters; Supabase Reference IDs usually have 20.`);
+if (problems.length) { for (const m of problems) console.error(`::error::${m}`); process.exit(1); }
 console.log(`::add-mask::${ref}`);
 // overridable only to rehearse this script against a local imitation of the Management API
 const API = process.env.SUPABASE_API_URL || 'https://api.supabase.com/v1';
