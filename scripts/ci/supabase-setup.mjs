@@ -4,7 +4,7 @@
 // 2. applies supabase/migrations/*.sql once each (tracked in public.app_migrations)
 // 3. loads the CAD baseline seed if the project has no tables yet
 // 4. sets the auth site URL so password-reset links return to the app
-// --keys-only stops after step 1 (used by the smoke-test job).
+// --keys-only stops after step 1 (used by the smoke-test job); --check only validates the secrets.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -63,6 +63,7 @@ const out = (k, v) => { console.log(`::add-mask::${v}`); if (process.env.GITHUB_
 // ---- 1. project + keys
 const project = await api(`/projects/${ref}`);
 console.log(`Project ${project.name} (${project.region}), status ${project.status}`);
+if (process.argv.includes('--check')) { console.log('Supabase secrets: OK (the token opens the project)'); process.exit(0); }
 if (project.status && !/ACTIVE/i.test(project.status)) throw new Error(`Project is ${project.status}; restore it in the Supabase dashboard first.`);
 const keys = await api(`/projects/${ref}/api-keys?reveal=true`);
 const pick = (names, types) => keys.find((k) => names.includes(k.name) && (!k.type || k.type === 'legacy'))?.api_key || keys.find((k) => types.includes(k.type))?.api_key;

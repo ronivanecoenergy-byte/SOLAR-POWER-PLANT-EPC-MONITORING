@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Decrypts data/bundle.tar.gz.enc with the DATA_KEY secret (used by the deploy workflow).
 #   scripts/ci/decrypt-data.sh [paths inside the bundle…]   (default: everything)
+#   scripts/ci/decrypt-data.sh --check                     (only verify the key)
 # The key is checked against a fingerprint (a short SHA-256 prefix, which reveals nothing about it)
 # so a wrong secret gives a clear message. Never prints the key.
 set -euo pipefail
@@ -21,6 +22,7 @@ if [ "$(fp "$key")" != "$EXPECTED_FP" ]; then
   fi
 fi
 [ "$key" = "$raw" ] || echo "::warning::DATA_KEY had spaces, a line break or quotes around it; they were ignored."
+if [ "${1:-}" = "--check" ]; then echo "DATA_KEY: OK"; exit 0; fi
 tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT
 DATA_KEY="$key" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 -pass env:DATA_KEY -in data/bundle.tar.gz.enc -out "$tmp"
 tar xzf "$tmp" "$@"
